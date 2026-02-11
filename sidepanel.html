@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="sidepanel.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <rect width="24" height="24" rx="6" fill="url(#logo-grad)" />
+                    <path d="M5 7h14v8a2 2 0 0 1-2 2H9.5l-2.5 2V17H5V7z" fill="white" opacity="0.9" />
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0" y1="0" x2="24" y2="24">
+                            <stop stop-color="#4F46E5" />
+                            <stop offset="1" stop-color="#7C3AED" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">MCP Chat</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <select id="providerSelect" class="provider-select">
+                <option value="gemini">Gemini</option>
+                <option value="ollama">Ollama</option>
+                <option value="groq">Groq</option>
+                <option value="openrouter">OpenRouter</option>
+            </select>
+            <div class="status-dot" id="statusDot" title="Disconnected"></div>
+        </div>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="tabs">
+        <button class="tab active" data-tab="chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Chat
+        </button>
+        <button class="tab" data-tab="tools">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                    d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+            </svg>
+            MCP Tools
+        </button>
+        <button class="tab" data-tab="settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3" />
+                <path
+                    d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+            Settings
+        </button>
+    </nav>
+
+    <!-- Chat Panel -->
+    <div class="panel active" id="chatPanel">
+        <div class="messages" id="messages">
+            <div class="welcome-message">
+                <div class="welcome-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" fill="#4F46E5" opacity="0.3" />
+                        <path d="M2 17l10 5 10-5" stroke="#7C3AED" stroke-width="1.5" fill="none" />
+                        <path d="M2 12l10 5 10-5" stroke="#4F46E5" stroke-width="1.5" fill="none" />
+                    </svg>
+                </div>
+                <h2>Welcome to MCP Chat</h2>
+                <p>Chat with AI using Gemini, Ollama, Groq, or OpenRouter. Access MCP tools to interact with your
+                    browser.</p>
+                <div class="quick-actions">
+                    <button class="quick-action" data-prompt="Summarize this page">📄 Summarize Page</button>
+                    <button class="quick-action" data-prompt="Explain the selected text">🔍 Explain Selection</button>
+                    <button class="quick-action" data-prompt="What MCP tools are available?">🔧 List Tools</button>
+                </div>
+            </div>
+        </div>
+        <div class="input-area">
+            <div class="input-toolbar">
+                <button class="toolbar-btn" id="attachPageBtn" title="Attach page content">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                </button>
+                <button class="toolbar-btn" id="clearChatBtn" title="Clear chat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                </button>
+            </div>
+            <div class="input-wrapper">
+                <textarea id="chatInput" placeholder="Type a message..." rows="1"></textarea>
+                <button id="sendBtn" class="send-btn" title="Send message">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Tools Panel -->
+    <div class="panel" id="toolsPanel">
+        <div class="tools-header">
+            <h3>MCP Tools</h3>
+            <button class="refresh-btn" id="refreshToolsBtn" title="Refresh tools">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+            </button>
+        </div>
+        <div class="tools-section">
+            <h4 class="section-title">
+                <span class="section-icon">🌐</span> Browser Tools
+            </h4>
+            <div id="browserTools" class="tools-grid">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+        <div class="tools-section">
+            <h4 class="section-title">
+                <span class="section-icon">🔌</span> MCP Server Tools
+            </h4>
+            <div id="mcpServerTools" class="tools-grid">
+                <div class="empty-state">
+                    <p>No MCP servers configured</p>
+                    <button class="link-btn" id="goToSettingsBtn">Configure in Settings →</button>
+                </div>
+            </div>
+        </div>
+        <div class="tool-output" id="toolOutput" style="display:none">
+            <div class="tool-output-header">
+                <span>Tool Output</span>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <button class="link-btn" id="useInChatBtn" style="font-size:11px;">💬 Use in Chat</button>
+                    <button class="close-btn" id="closeToolOutput">×</button>
+                </div>
+            </div>
+            <pre id="toolOutputContent"></pre>
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="panel" id="settingsPanel">
+        <div class="settings-content">
+            <h3 class="settings-title">Configuration</h3>
+
+            <!-- Provider Settings -->
+            <div class="settings-group">
+                <h4 class="group-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 14a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm1-5.16V8a1 1 0 0 0-2 0v2.84a3 3 0 1 0 2 0z" />
+                    </svg>
+                    AI Providers
+                </h4>
+
+                <!-- Gemini -->
+                <div class="setting-card">
+                    <div class="setting-card-header">
+                        <span class="provider-badge gemini">Gemini</span>
+                        <span class="connection-status" id="geminiStatus">Not configured</span>
+                    </div>
+                    <div class="setting-field">
+                        <label for="geminiKey">API Key</label>
+                        <div class="key-input-wrap">
+                            <input type="password" id="geminiKey" placeholder="Enter Gemini API key" autocomplete="off">
+                            <button class="toggle-visibility" data-target="geminiKey">👁</button>
+                        </div>
+                    </div>
+                    <div class="setting-field">
+                        <label for="geminiModel">Model</label>
+                        <input type="text" id="geminiModel" placeholder="gemini-2.0-flash" value="gemini-2.0-flash">
+                    </div>
+                </div>
+
+                <!-- Ollama -->
+                <div class="setting-card">
+                    <div class="setting-card-header">
+                        <span class="provider-badge ollama">Ollama</span>
+                        <span class="connection-status" id="ollamaStatus">Not connected</span>
+                    </div>
+                    <div class="setting-field">
+                        <label for="ollamaUrl">Server URL</label>
+                        <input type="text" id="ollamaUrl" placeholder="http://localhost:11434"
+                            value="http://localhost:11434">
+                    </div>
+                    <div class="setting-field">
+                        <label for="ollamaModel">Model</label>
+                        <input type="text" id="ollamaModel" placeholder="llama3.2" value="llama3.2">
+                    </div>
+                </div>
+
+                <!-- Groq -->
+                <div class="setting-card">
+                    <div class="setting-card-header">
+                        <span class="provider-badge groq">Groq</span>
+                        <span class="connection-status" id="groqStatus">Not configured</span>
+                    </div>
+                    <div class="setting-field">
+                        <label for="groqKey">API Key</label>
+                        <div class="key-input-wrap">
+                            <input type="password" id="groqKey" placeholder="Enter Groq API key" autocomplete="off">
+                            <button class="toggle-visibility" data-target="groqKey">👁</button>
+                        </div>
+                    </div>
+                    <div class="setting-field">
+                        <label for="groqModel">Model</label>
+                        <input type="text" id="groqModel" placeholder="llama-3.3-70b-versatile"
+                            value="llama-3.3-70b-versatile">
+                    </div>
+                </div>
+
+                <!-- OpenRouter -->
+                <div class="setting-card">
+                    <div class="setting-card-header">
+                        <span class="provider-badge openrouter">OpenRouter</span>
+                        <span class="connection-status" id="openrouterStatus">Not configured</span>
+                    </div>
+                    <div class="setting-field">
+                        <label for="openrouterKey">API Key</label>
+                        <div class="key-input-wrap">
+                            <input type="password" id="openrouterKey" placeholder="Enter OpenRouter API key"
+                                autocomplete="off">
+                            <button class="toggle-visibility" data-target="openrouterKey">👁</button>
+                        </div>
+                    </div>
+                    <div class="setting-field">
+                        <label for="openrouterModel">Model</label>
+                        <input type="text" id="openrouterModel" placeholder="google/gemini-2.0-flash-001"
+                            value="google/gemini-2.0-flash-001">
+                    </div>
+                </div>
+            </div>
+
+            <!-- MCP Server Config -->
+            <div class="settings-group">
+                <h4 class="group-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                        <circle cx="6" cy="6" r="1" />
+                        <circle cx="6" cy="18" r="1" />
+                    </svg>
+                    MCP Servers
+                </h4>
+                <div class="setting-card">
+                    <div class="setting-field">
+                        <label for="mcpConfig">Server Configuration (JSON)</label>
+                        <textarea id="mcpConfig" class="code-textarea" rows="10" placeholder='{
+  "mcpServers": {
+    "myserver": {
+      "url": "http://localhost:3001/sse",
+      "transport": "sse"
+    }
+  }
+}'></textarea>
+                    </div>
+                    <p class="help-text">
+                        Configure MCP servers to connect via the bridge. Run <code>node mcp-bridge.js</code> first,
+                        then the extension auto-connects to <code>http://localhost:3100</code>.
+                    </p>
+                </div>
+            </div>
+
+            <!-- System Prompt -->
+            <div class="settings-group">
+                <h4 class="group-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    System Prompt
+                </h4>
+                <div class="setting-card">
+                    <div class="setting-field">
+                        <textarea id="systemPrompt" rows="4"
+                            placeholder="You are a helpful AI assistant with access to browser tools...">You are a helpful AI assistant with access to MCP browser tools. You can help users interact with web pages, summarize content, and use various tools to accomplish tasks.</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-actions">
+                <button class="btn btn-primary" id="saveSettingsBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save Settings
+                </button>
+                <button class="btn btn-secondary" id="testConnectionBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                    </svg>
+                    Test Connection
+                </button>
+                <button class="btn btn-danger" id="resetSettingsBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10" />
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                    Reset
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Scripts -->
+    <script src="lib/marked.min.js"></script>
+    <script src="providers/base.js"></script>
+    <script src="providers/gemini.js"></script>
+    <script src="providers/ollama.js"></script>
+    <script src="providers/groq.js"></script>
+    <script src="providers/openrouter.js"></script>
+    <script src="mcp/tools.js"></script>
+    <script src="mcp/client.js"></script>
+    <script src="sidepanel.js"></script>
+</body>
+
+</html>

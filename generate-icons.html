@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head><title>Generate Icons</title></head>
+<body>
+<h2>Icon Generator - Open this file in Chrome, right-click each canvas and "Save image as..."</h2>
+<p>Save as: icons/icon16.png, icons/icon48.png, icons/icon128.png</p>
+<div id="canvases"></div>
+<script>
+const sizes = [16, 48, 128];
+sizes.forEach(size => {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  
+  // Background
+  const r = size * 0.22;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, r);
+  ctx.fillStyle = '#0F172A';
+  ctx.fill();
+  
+  // Gradient bubble
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, '#4F46E5');
+  grad.addColorStop(1, '#7C3AED');
+  ctx.fillStyle = grad;
+  
+  const m = size * 0.2;
+  const bw = size - 2 * m;
+  const bh = size * 0.4;
+  const br = size * 0.08;
+  ctx.beginPath();
+  ctx.roundRect(m, m, bw, bh, br);
+  ctx.fill();
+  
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(m + bw * 0.2, m + bh);
+  ctx.lineTo(m + bw * 0.1, m + bh + size * 0.12);
+  ctx.lineTo(m + bw * 0.35, m + bh);
+  ctx.fill();
+  
+  // Dots
+  ctx.fillStyle = '#ffffff';
+  const dotR = size * 0.04;
+  const dotY = m + bh * 0.5;
+  [0.3, 0.5, 0.7].forEach(pct => {
+    ctx.beginPath();
+    ctx.arc(m + bw * pct, dotY, dotR, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  
+  const label = document.createElement('div');
+  label.innerHTML = `<p><strong>${size}x${size}</strong></p>`;
+  document.getElementById('canvases').appendChild(label);
+  document.getElementById('canvases').appendChild(canvas);
+  
+  // Auto-download
+  const link = document.createElement('a');
+  link.download = `icon${size}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.textContent = ` Download icon${size}.png`;
+  label.appendChild(link);
+});
+</script>
+</body>
+</html>
