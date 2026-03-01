@@ -23,6 +23,7 @@
         messages: $('#messages'),
         chatInput: $('#chatInput'),
         sendBtn: $('#sendBtn'),
+        stopBtn: $('#stopBtn'),
         attachPageBtn: $('#attachPageBtn'),
         clearChatBtn: $('#clearChatBtn'),
         browserTools: $('#browserTools'),
@@ -233,8 +234,8 @@
 
         // Start streaming
         isStreaming = true;
-        elements.sendBtn.classList.add('loading');
-        elements.sendBtn.disabled = true;
+        elements.sendBtn.style.display = 'none';
+        elements.stopBtn.style.display = 'flex';
         elements.chatInput.disabled = true;
         abortController = new AbortController();
 
@@ -334,8 +335,8 @@
             chatHistory.pop();
         } finally {
             isStreaming = false;
-            elements.sendBtn.classList.remove('loading');
-            elements.sendBtn.disabled = false;
+            elements.sendBtn.style.display = 'flex';
+            elements.stopBtn.style.display = 'none';
             elements.chatInput.disabled = false;
             elements.chatInput.focus();
             abortController = null;
@@ -380,10 +381,229 @@
 
         const avatar = role === 'user' ? 'U' : '✦';
 
+        const editButtonHtml = role === 'user' ? `
+        <button class="edit-msg-btn" title="Edit message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+        </button>
+    ` : '';
+
+        // Store original content
+        msgEl.dataset.originalContent = content || '';
+
         msgEl.innerHTML = `
       <div class="message-avatar">${avatar}</div>
-      <div class="message-content">${content ? renderMarkdown(content) : ''}</div>
+      <div class="message-content-wrapper">
+          <div class="message-content" data-role="${role}">${content ? renderMarkdown(content) : ''}</div>
+          ${editButtonHtml}
+      </div>
     `;
+
+        // Add edit functionality
+        if (role === 'user') {
+            const editBtn = msgEl.querySelector('.edit-msg-btn');
+            if (editBtn) {
+                editBtn.addEventListener('click', () => {
+                    const contentEl = msgEl.querySelector('.message-content');
+                    const contentWrapper = msgEl.querySelector('.message-content-wrapper');
+
+                    // Switch to edit mode
+                    const originalContent = msgEl.dataset.originalContent;
+
+                    // Hide normal content and edit button
+                    contentEl.style.display = 'none';
+                    editBtn.style.display = 'none';
+
+                    // Create edit interface
+                    const editInterface = document.createElement('div');
+                    editInterface.className = 'edit-interface';
+                    editInterface.innerHTML = `
+                    <textarea class="edit-textarea">${originalContent}</textarea>
+                    <div class="edit-actions">
+                        <button class="btn btn-secondary cancel-edit-btn">Cancel</button>
+                        <button class="btn btn-primary save-edit-btn">Save & Send</button>
+                    </div>
+                `;
+
+                    contentWrapper.appendChild(editInterface);
+
+                    const textarea = editInterface.querySelector('.edit-textarea');
+                    textarea.style.height = 'auto';
+                    textarea.style.height = Math.min(Math.max(textarea.scrollHeight, 40), 120) + 'px';
+                    textarea.focus();
+
+                    // Auto-resize textarea
+                    textarea.addEventListener('input', () => {
+                        textarea.style.height = 'auto';
+                        textarea.style.height = Math.min(Math.max(textarea.scrollHeight, 40), 120) + 'px';
+                    });
+
+                    // Handle Cancel
+                    editInterface.querySelector('.cancel-edit-btn').addEventListener('click', () => {
+                        editInterface.remove();
+                        contentEl.style.display = 'block';
+                        editBtn.style.display = 'flex';
+                    });
+
+                    // Handle Save
+                    editInterface.querySelector('.save-edit-btn').addEventListener('click', () => {
+                        const newContent = textarea.value.trim();
+                        if (!newContent) return;
+                        if (isStreaming) return; // Don't allow if already streaming
+
+                        // Update dataset and remove interface
+                        msgEl.dataset.originalContent = newContent;
+                        editInterface.remove();
+                        contentEl.innerHTML = renderMarkdown(newContent);
+                        contentEl.style.display = 'block';
+                        editBtn.style.display = 'flex';
+
+                        // We need to resend from this point.
+                        // Find index of this message in DOM to slice chat history
+                        const messagesContainer = document.getElementById('messages');
+                        const allMessages = Array.from(messagesContainer.querySelectorAll('.message'));
+                        const msgIndex = allMessages.indexOf(msgEl);
+
+                        if (msgIndex !== -1) {
+                            // Remove all subsequent messages from DOM
+                            for (let i = allMessages.length - 1; i > msgIndex; i--) {
+                                allMessages[i].remove();
+                            }
+
+                            // Update chat history
+                            chatHistory = chatHistory.slice(0, msgIndex);
+                            // Make sure we update chat history with the new content
+                            chatHistory.push({ role: 'user', content: newContent });
+                            saveChatHistory();
+
+                            // Resend the message logic - copy logic from sendMessage
+                            const allTools = [];
+                            const browserFns = BrowserTools.toOpenAIFunctions(BrowserTools.list);
+                            allTools.push(...browserFns);
+
+                            if (mcpClient) {
+                                const mcpTools = mcpClient.getAllTools();
+                                for (const t of mcpTools) {
+                                    allTools.push({
+                                        type: 'function',
+                                        function: {
+                                            name: t.name,
+                                            description: t.description || '',
+                                            parameters: t.inputSchema || { type: 'object', properties: {} }
+                                        }
+                                    });
+                                }
+                            }
+
+                            const systemContent = settings.systemPrompt || 'You are a helpful AI assistant with access to browser tools and MCP tools.';
+                            const messages = [
+                                { role: 'system', content: systemContent },
+                                ...chatHistory
+                            ];
+
+                            const assistantEl = addMessageToUI('assistant', '');
+                            const newContentEl = assistantEl.querySelector('.message-content');
+                            newContentEl.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+                            isStreaming = true;
+                            if (elements.sendBtn) elements.sendBtn.style.display = 'none';
+                            if (elements.stopBtn) elements.stopBtn.style.display = 'flex';
+                            if (elements.chatInput) elements.chatInput.disabled = true;
+                            abortController = new AbortController();
+
+                            let fullResponse = '';
+                            const MAX_TOOL_ITERATIONS = 5;
+
+                            (async () => {
+                                try {
+                                    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+                                        let toolCallResult = null;
+
+                                        toolCallResult = await currentProvider.sendMessage(messages, (chunk) => {
+                                            if (fullResponse === '') newContentEl.innerHTML = '';
+                                            fullResponse += chunk;
+                                            newContentEl.innerHTML = renderMarkdown(fullResponse);
+                                            elements.messages.scrollTop = elements.messages.scrollHeight;
+                                        }, abortController.signal, allTools.length > 0 ? allTools : null);
+
+                                        if (!toolCallResult || !toolCallResult.toolCalls || toolCallResult.toolCalls.length === 0) {
+                                            break;
+                                        }
+
+                                        const assistantToolMsg = {
+                                            role: 'assistant',
+                                            content: toolCallResult.content || null,
+                                            tool_calls: toolCallResult.toolCalls
+                                        };
+                                        messages.push(assistantToolMsg);
+
+                                        fullResponse += '\n\n';
+
+                                        for (const toolCall of toolCallResult.toolCalls) {
+                                            const fnName = toolCall.function?.name || 'unknown';
+                                            let fnArgs = {};
+                                            try { fnArgs = JSON.parse(toolCall.function?.arguments || '{}'); } catch { fnArgs = {}; }
+
+                                            fullResponse += `🔧 **Executing:** \`${fnName}\``;
+                                            if (Object.keys(fnArgs).length > 0) fullResponse += ` with ${JSON.stringify(fnArgs)}`;
+                                            fullResponse += '\n';
+                                            newContentEl.innerHTML = renderMarkdown(fullResponse);
+                                            elements.messages.scrollTop = elements.messages.scrollHeight;
+
+                                            let toolResult;
+                                            try {
+                                                toolResult = await executeToolByName(fnName, fnArgs);
+                                                fullResponse += `✅ **Result:** ${truncateResult(toolResult)}\n\n`;
+                                            } catch (err) {
+                                                toolResult = { error: err.message };
+                                                fullResponse += `❌ **Error:** ${err.message}\n\n`;
+                                            }
+
+                                            newContentEl.innerHTML = renderMarkdown(fullResponse);
+                                            elements.messages.scrollTop = elements.messages.scrollHeight;
+
+                                            messages.push({
+                                                role: 'tool',
+                                                tool_call_id: toolCall.id,
+                                                content: JSON.stringify(toolResult)
+                                            });
+                                        }
+
+                                        fullResponse += '---\n\n';
+                                        newContentEl.innerHTML = renderMarkdown(fullResponse) + '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                                    }
+
+                                    if (!fullResponse) {
+                                        newContentEl.innerHTML = '<span style="color: var(--warning)">⚠ No response received. Check your API key in Settings and ensure the selected provider is configured correctly.</span>';
+                                        chatHistory.pop(); // Remove assistant message
+                                    } else {
+                                        chatHistory.push({ role: 'assistant', content: fullResponse });
+                                        saveChatHistory();
+                                    }
+
+                                } catch (error) {
+                                    if (error.name === 'AbortError') {
+                                        newContentEl.innerHTML += '<br><span style="color: var(--warning); font-size: 11px;">⚠ Response cancelled</span>';
+                                    } else {
+                                        newContentEl.innerHTML = `<div class="error-message">❌ ${escapeHtml(error.message)}</div>`;
+                                    }
+                                    chatHistory.pop();
+                                } finally {
+                                    isStreaming = false;
+                                    if (elements.sendBtn) elements.sendBtn.style.display = 'flex';
+                                    if (elements.stopBtn) elements.stopBtn.style.display = 'none';
+                                    if (elements.chatInput) elements.chatInput.disabled = false;
+                                    if (elements.chatInput) elements.chatInput.focus();
+                                    abortController = null;
+                                }
+                            })();
+                        }
+                    });
+                });
+            }
+        }
 
         elements.messages.appendChild(msgEl);
         elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -654,16 +874,18 @@
 
         // Send message
         elements.sendBtn.addEventListener('click', () => {
-            if (isStreaming) {
-                // Cancel streaming
-                if (abortController) abortController.abort();
-                return;
-            }
             const text = elements.chatInput.value.trim();
-            if (text) {
+            if (text && !isStreaming) {
                 elements.chatInput.value = '';
                 elements.chatInput.style.height = 'auto';
                 sendMessage(text);
+            }
+        });
+
+        // Stop generating
+        elements.stopBtn.addEventListener('click', () => {
+            if (isStreaming && abortController) {
+                abortController.abort();
             }
         });
 

@@ -5,7 +5,7 @@ class GroqProvider extends BaseProvider {
         super(config);
         this.name = 'groq';
         this.label = 'Groq';
-        this.defaultModel = 'llama-3.3-70b-versatile';
+        this.defaultModel = 'llama-3.1-8b-instant';
     }
 
     getEndpoint() {

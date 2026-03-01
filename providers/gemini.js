@@ -5,7 +5,7 @@ class GeminiProvider extends BaseProvider {
         super(config);
         this.name = 'gemini';
         this.label = 'Gemini';
-        this.defaultModel = 'gemini-2.0-flash';
+        this.defaultModel = 'gemini-2.5-flash';
     }
 
     getEndpoint() {

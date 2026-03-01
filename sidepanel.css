@@ -359,21 +359,104 @@ body {
   border-radius: var(--radius-lg);
   line-height: 1.55;
   font-size: 13px;
-  max-width: calc(100% - 42px);
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+
+.message-content-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100% - 42px);
+  gap: 4px;
+}
+
+.message.user .message-content-wrapper {
+  align-items: flex-end;
 }
 
 .message.user .message-content {
   background: var(--accent-primary);
   color: white;
   border-bottom-right-radius: 4px;
+  width: 100%;
 }
 
 .message.assistant .message-content {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-bottom-left-radius: 4px;
+  width: 100%;
+}
+
+/* Edit Message Interface */
+.edit-msg-btn {
+  position: absolute;
+  top: 5px;
+  right: calc(100% + 8px);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+  z-index: 10;
+}
+
+.message:hover .edit-msg-btn {
+  opacity: 1;
+}
+
+.edit-msg-btn:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.edit-interface {
+  width: 100%;
+  min-width: 260px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-md);
+  animation: messageIn 0.2s ease-out;
+}
+
+.edit-textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  resize: none;
+  outline: none;
+  min-height: 40px;
+  transition: border-color 0.2s;
+}
+
+.edit-textarea:focus {
+  border-color: rgba(79, 70, 229, 0.5);
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Markdown in messages */
@@ -634,6 +717,33 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+.stop-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-glass);
+  color: var(--danger);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.stop-btn:hover {
+  border-color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  transform: scale(1.05);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+.stop-btn:active {
+  transform: scale(0.96);
 }
 
 /* ===== Tools Panel ===== */

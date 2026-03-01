@@ -1,5 +1,12 @@
 {
   "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "C:/Users/Jeyaram/Desktop/mcp-tool/storage"
+      ]
+    },
     "browsermcp": {
       "command": "npx",
       "args": ["@browsermcp/mcp@latest"]
