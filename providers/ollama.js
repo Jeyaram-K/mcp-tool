@@ -5,7 +5,7 @@ class OllamaProvider extends BaseProvider {
         super(config);
         this.name = 'ollama';
         this.label = 'Ollama';
-        this.defaultModel = 'llama3.2';
+        this.defaultModel = 'qwen3-vl:8b-instruct';
     }
 
     getEndpoint() {

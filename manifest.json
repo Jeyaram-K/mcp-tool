@@ -8,7 +8,9 @@
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "debugger",
+    "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"

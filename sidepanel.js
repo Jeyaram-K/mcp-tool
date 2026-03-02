@@ -25,8 +25,10 @@
         sendBtn: $('#sendBtn'),
         stopBtn: $('#stopBtn'),
         attachPageBtn: $('#attachPageBtn'),
+        attachTabBtn: $('#attachTabBtn'),
         clearChatBtn: $('#clearChatBtn'),
         browserTools: $('#browserTools'),
+        cdpTools: $('#cdpTools'),
         mcpServerTools: $('#mcpServerTools'),
         toolOutput: $('#toolOutput'),
         toolOutputContent: $('#toolOutputContent'),
@@ -45,8 +47,26 @@
         initProviders();
         setupEventListeners();
         renderBrowserTools();
+        renderCDPTools();
         await loadChatHistory();
         initMCPClient();
+        updateMemoryIndicator();
+    }
+
+    function updateMemoryIndicator() {
+        const el = document.getElementById('memoryIndicator');
+        if (!el || typeof AIMemory === 'undefined') return;
+        try {
+            const stats = AIMemory.getStats();
+            const total = stats.totalPatterns + stats.totalFixes + stats.totalSequences;
+            if (total > 0) {
+                el.textContent = `🧠 ${total}`;
+                el.title = `AI Memory: ${stats.totalPatterns} patterns, ${stats.totalFixes} fixes, ${stats.totalSequences} sequences across ${stats.domains} sites`;
+            } else {
+                el.textContent = '🧠 Ready';
+                el.title = 'AI Memory: Learning from your interactions';
+            }
+        } catch { el.textContent = '🧠'; }
     }
 
     // ===== Settings Management =====
@@ -64,7 +84,7 @@
         return {
             activeProvider: 'gemini',
             gemini: { apiKey: '', model: 'gemini-2.0-flash' },
-            ollama: { url: 'http://localhost:11434', model: 'llama3.2' },
+            ollama: { url: 'http://localhost:11434', model: 'qwen3-vl:8b-instruct' },
             groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
             openrouter: { apiKey: '', model: 'google/gemini-2.0-flash-001' },
             mcpConfig: JSON.stringify({
@@ -75,7 +95,37 @@
                     }
                 }
             }, null, 2),
-            systemPrompt: 'You are a helpful AI assistant with access to MCP browser tools. You can help users interact with web pages, summarize content, and use various tools to accomplish tasks. When asked to use a tool, execute it and share the results.'
+            systemPrompt: `You are an expert browser automation agent. Be fast, precise, and efficient.
+
+WORKFLOW: Think → Act → Verify (only if needed)
+- THINK first: plan your steps mentally before making any tool call. Use the fewest tools possible.
+- ACT directly: if you know the selector (from SITE KNOWLEDGE or common patterns), use it immediately. Don't search for what you already know.
+- VERIFY only when uncertain: skip verification for simple actions like navigation or filling a known input.
+
+SELECTORS — how to find elements (ordered by efficiency):
+1. SITE KNOWLEDGE selectors → use directly, zero tool calls needed
+2. Common patterns → most sites use standard selectors (input[type="search"], button[type="submit"], nav a, etc.)
+3. cdp_smart_locate → use ONLY when you genuinely don't know the selector. Don't use it for elements you can guess.
+4. cdp_annotate_page → use ONLY when the page is complex/unfamiliar and you need a full layout overview
+5. cdp_get_page_content → use ONLY as last resort for full element dumps
+
+DON'T waste tool calls on:
+- Searching for elements you already have selectors for
+- Reading page content after every single action
+- Verifying obvious successes (navigation, typing)
+- Calling cdp_annotate_page on well-known sites (YouTube, Google, Amazon)
+
+ERROR RECOVERY (autonomous):
+- Element not found → try cdp_smart_locate with a description, then retry
+- Click failed → retry with rawCDP: true
+- Navigation stuck → use cdp_wait_for or cdp_wait_idle
+- Never stop and ask the user — fix it yourself
+
+RULES:
+- Chain tool calls without pausing to ask the user
+- Show brief progress updates between steps
+- Never ask "would you like me to...?" — just do it
+- Be concise in responses — focus on action, not explanation`
         };
     }
 
@@ -84,7 +134,7 @@
         $('#geminiKey').value = settings.gemini?.apiKey || '';
         $('#geminiModel').value = settings.gemini?.model || 'gemini-2.0-flash';
         $('#ollamaUrl').value = settings.ollama?.url || 'http://localhost:11434';
-        $('#ollamaModel').value = settings.ollama?.model || 'llama3.2';
+        $('#ollamaModel').value = settings.ollama?.model || 'qwen3-vl:8b-instruct';
         $('#groqKey').value = settings.groq?.apiKey || '';
         $('#groqModel').value = settings.groq?.model || 'llama-3.3-70b-versatile';
         $('#openrouterKey').value = settings.openrouter?.apiKey || '';
@@ -102,7 +152,7 @@
             },
             ollama: {
                 url: $('#ollamaUrl').value.trim() || 'http://localhost:11434',
-                model: $('#ollamaModel').value.trim() || 'llama3.2'
+                model: $('#ollamaModel').value.trim() || 'qwen3-vl:8b-instruct'
             },
             groq: {
                 apiKey: $('#groqKey').value.trim(),
@@ -201,6 +251,19 @@
         const browserFns = BrowserTools.toOpenAIFunctions(BrowserTools.list);
         allTools.push(...browserFns);
 
+        // CDP browser control tools
+        if (typeof CDPTools !== 'undefined') {
+            const cdpFns = CDPTools.list.map(t => ({
+                type: 'function',
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.inputSchema || { type: 'object', properties: {} }
+                }
+            }));
+            allTools.push(...cdpFns);
+        }
+
         // MCP server tools
         if (mcpClient) {
             const mcpTools = mcpClient.getAllTools();
@@ -216,13 +279,61 @@
             }
         }
 
-        // Prepare system message
-        const systemContent = settings.systemPrompt || 'You are a helpful AI assistant with access to browser tools and MCP tools.';
+        // Prepare system message with tool catalog
+        let systemContent = settings.systemPrompt || 'You are a helpful AI assistant with access to browser tools and MCP tools.';
+
+        // Inject tool catalog so the AI knows what's available
+        const toolNames = allTools.map(t => t.function?.name || t.name).filter(Boolean);
+        if (toolNames.length > 0) {
+            systemContent += `\n\nAvailable tools (${toolNames.length}): ${toolNames.join(', ')}`;
+        }
+
+        // Inject learned knowledge for the current domain
+        let currentDomain = 'unknown';
+        try {
+            const pageInfo = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ type: 'CDP_GET_PAGE_INFO' }, (r) => resolve(r));
+            });
+            if (pageInfo?.data?.url) {
+                currentDomain = AIMemory.getDomain(pageInfo.data.url);
+                const knowledge = AIMemory.getKnowledge(pageInfo.data.url);
+                if (knowledge.trim()) {
+                    systemContent += `\n\n=== SITE KNOWLEDGE (use these selectors directly, don't search for them) ===${knowledge}`;
+                }
+            }
+        } catch { /* no page info available */ }
+
+        // Vision support: automatically grab a screenshot if using an Ollama Vision model
+        let screenshotDataUrl = null;
+        const isVisionModel = settings.activeProvider === 'ollama' &&
+            settings.ollama?.model &&
+            settings.ollama.model.toLowerCase().includes('vl');
+
+        if (isVisionModel) {
+            try {
+                const screenRes = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' }, (r) => resolve(r));
+                });
+                if (screenRes && screenRes.data && !screenRes.error) {
+                    screenshotDataUrl = screenRes.data;
+                    console.log('[MCP Chat] Attached screenshot for Vision-Language model');
+                }
+            } catch (e) {
+                console.warn('[MCP Chat] Failed to grab screenshot for VL model:', e);
+            }
+        }
+
+        // Format user message to support vision inputs
+        const userMessageContent = screenshotDataUrl ? [
+            { type: 'text', text: userText },
+            { type: 'image_url', image_url: { url: screenshotDataUrl } }
+        ] : userText;
 
         // Build messages
         const messages = [
             { role: 'system', content: systemContent },
-            ...chatHistory
+            ...chatHistory.slice(0, -1), // Everything except the newly added user text (which we replace below)
+            { role: 'user', content: userMessageContent }
         ];
 
         // Create assistant message element
@@ -240,7 +351,7 @@
         abortController = new AbortController();
 
         let fullResponse = '';
-        const MAX_TOOL_ITERATIONS = 5;
+        const MAX_TOOL_ITERATIONS = 25;
 
         try {
             // Tool call loop: send → detect tool calls → execute → send results → repeat
@@ -294,13 +405,37 @@
 
                     // Execute the tool
                     let toolResult;
+                    let toolSuccess = false;
                     try {
                         toolResult = await executeToolByName(fnName, fnArgs);
-                        fullResponse += `✅ **Result:** ${truncateResult(toolResult)}\n\n`;
+
+                        // Check if the result is genuinely successful (not a soft error)
+                        const isRealSuccess = toolResult
+                            && !toolResult.error
+                            && toolResult.verified !== false
+                            && !toolResult.rawCDPError;
+                        toolSuccess = isRealSuccess;
+
+                        if (isRealSuccess) {
+                            fullResponse += `✅ **Result:** ${truncateResult(toolResult)}\n\n`;
+                        } else if (toolResult?.error) {
+                            fullResponse += `⚠️ **Partial:** ${truncateResult(toolResult)}\n\n`;
+                        } else {
+                            fullResponse += `✅ **Result:** ${truncateResult(toolResult)}\n\n`;
+                        }
+
+                        // Auto-learn ONLY from genuinely successful tool calls
+                        if (isRealSuccess && typeof AIMemory !== 'undefined' && currentDomain !== 'unknown') {
+                            try { AIMemory.learnSuccess(currentDomain, fnName, fnArgs, toolResult); updateMemoryIndicator(); } catch { }
+                        }
                     } catch (err) {
                         toolResult = { error: err.message };
                         fullResponse += `❌ **Error:** ${err.message}\n\n`;
                     }
+
+                    // Track tool calls for sequence learning (only successes)
+                    if (!messages._toolSequence) messages._toolSequence = [];
+                    messages._toolSequence.push({ name: fnName, args: fnArgs, error: toolResult?.error, success: toolSuccess });
 
                     contentEl.innerHTML = renderMarkdown(fullResponse);
                     elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -316,6 +451,36 @@
                 // Show typing again for the AI's follow-up response
                 fullResponse += '---\n\n';
                 contentEl.innerHTML = renderMarkdown(fullResponse) + '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+                // If vision model, append another screenshot before the next iteration
+                if (isVisionModel && toolCallResult && toolCallResult.toolCalls && toolCallResult.toolCalls.length > 0) {
+                    try {
+                        const nextScreenRes = await new Promise((resolve) => {
+                            chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' }, (r) => resolve(r));
+                        });
+                        if (nextScreenRes && nextScreenRes.data && !nextScreenRes.error) {
+                            messages.push({
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: 'Here is what the screen looks like now after those actions:' },
+                                    { type: 'image_url', image_url: { url: nextScreenRes.data } }
+                                ]
+                            });
+                            console.log('[MCP Chat] Attached follow-up screenshot for VL model');
+                        }
+                    } catch (e) {
+                        console.warn('[MCP Chat] Failed to grab follow-up screenshot:', e);
+                    }
+                }
+            } // End tool iteration loop
+
+            // Auto-learn MUST happen here, before we add the vision message at the end
+            if (typeof AIMemory !== 'undefined' && currentDomain !== 'unknown' && messages._toolSequence && messages._toolSequence.length > 1) {
+                try {
+                    const taskDesc = userText.substring(0, 100);
+                    AIMemory.learnSequence(currentDomain, taskDesc, messages._toolSequence);
+                    updateMemoryIndicator();
+                } catch { }
             }
 
             if (!fullResponse) {
@@ -351,6 +516,14 @@
         const browserTool = BrowserTools.list.find(t => t.name === name);
         if (browserTool) {
             return await browserTool.execute(args);
+        }
+
+        // Check CDP tools
+        if (typeof CDPTools !== 'undefined') {
+            const cdpTool = CDPTools.list.find(t => t.name === name);
+            if (cdpTool) {
+                return await cdpTool.execute(args);
+            }
         }
 
         // Check MCP tools
@@ -448,7 +621,7 @@
                     });
 
                     // Handle Save
-                    editInterface.querySelector('.save-edit-btn').addEventListener('click', () => {
+                    editInterface.querySelector('.save-edit-btn').addEventListener('click', async () => {
                         const newContent = textarea.value.trim();
                         if (!newContent) return;
                         if (isStreaming) return; // Don't allow if already streaming
@@ -483,6 +656,19 @@
                             const browserFns = BrowserTools.toOpenAIFunctions(BrowserTools.list);
                             allTools.push(...browserFns);
 
+                            // CDP browser control tools
+                            if (typeof CDPTools !== 'undefined') {
+                                const cdpFns = CDPTools.list.map(t => ({
+                                    type: 'function',
+                                    function: {
+                                        name: t.name,
+                                        description: t.description,
+                                        parameters: t.inputSchema || { type: 'object', properties: {} }
+                                    }
+                                }));
+                                allTools.push(...cdpFns);
+                            }
+
                             if (mcpClient) {
                                 const mcpTools = mcpClient.getAllTools();
                                 for (const t of mcpTools) {
@@ -498,6 +684,39 @@
                             }
 
                             const systemContent = settings.systemPrompt || 'You are a helpful AI assistant with access to browser tools and MCP tools.';
+
+                            // Vision support for resent messages
+                            let screenshotDataUrl = null;
+                            const isVisionModel = settings.activeProvider === 'ollama' &&
+                                settings.ollama?.model &&
+                                settings.ollama.model.toLowerCase().includes('vl');
+
+                            if (isVisionModel) {
+                                try {
+                                    const screenRes = await new Promise((resolve) => {
+                                        chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' }, (r) => resolve(r));
+                                    });
+                                    if (screenRes && screenRes.data && !screenRes.error) {
+                                        screenshotDataUrl = screenRes.data;
+                                        console.log('[MCP Chat] Attached screenshot for resent VL message');
+                                    }
+                                } catch (e) {
+                                    console.warn('[MCP Chat] Failed to grab screenshot for resent VL message:', e);
+                                }
+                            }
+
+                            // Replace the last chat history item (which we just added) with the multimodal message
+                            if (screenshotDataUrl) {
+                                chatHistory.pop();
+                                chatHistory.push({
+                                    role: 'user',
+                                    content: [
+                                        { type: 'text', text: newContent },
+                                        { type: 'image_url', image_url: { url: screenshotDataUrl } }
+                                    ]
+                                });
+                            }
+
                             const messages = [
                                 { role: 'system', content: systemContent },
                                 ...chatHistory
@@ -700,13 +919,33 @@
     }
 
     // ===== Tools UI =====
+    function renderCDPTools() {
+        if (typeof CDPTools === 'undefined') return;
+        const tools = CDPTools.list;
+        elements.cdpTools.innerHTML = tools.map(tool => `
+      <div class="tool-card" data-tool="${tool.name}" data-source="cdp">
+        <div class="tool-card-name" style="justify-content: space-between;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="tool-icon">${tool.icon}</span>
+            ${tool.name}
+          </div>
+          <span style="font-size:9px; background:rgba(79,70,229,0.2); color:#818CF8; padding:2px 6px; border-radius:10px; text-transform:uppercase; letter-spacing:0.5px;">CDP</span>
+        </div>
+        <div class="tool-card-desc">${tool.description}</div>
+      </div>
+    `).join('');
+    }
+
     function renderBrowserTools() {
         const tools = BrowserTools.list;
         elements.browserTools.innerHTML = tools.map(tool => `
       <div class="tool-card" data-tool="${tool.name}" data-source="browser">
-        <div class="tool-card-name">
-          <span class="tool-icon">${tool.icon}</span>
-          ${tool.name}
+        <div class="tool-card-name" style="justify-content: space-between;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="tool-icon">${tool.icon}</span>
+            ${tool.name}
+          </div>
+          <span style="font-size:9px; background:rgba(16,185,129,0.15); color:#34D399; padding:2px 6px; border-radius:10px; text-transform:uppercase; letter-spacing:0.5px;">Browser</span>
         </div>
         <div class="tool-card-desc">${tool.description}</div>
       </div>
@@ -728,10 +967,12 @@
 
         elements.mcpServerTools.innerHTML = tools.map(tool => `
       <div class="tool-card" data-tool="${tool.name}" data-source="mcp" data-server="${tool.serverName}">
-        <div class="tool-card-name">
-          <span class="tool-icon">${tool.icon}</span>
-          ${tool.name}
-          <span style="font-size:10px; color:var(--text-muted); margin-left:auto;">${tool.serverName}</span>
+        <div class="tool-card-name" style="justify-content: space-between;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="tool-icon">${tool.icon || '🔌'}</span>
+            ${tool.name}
+          </div>
+          <span style="font-size:9px; background:rgba(245,158,11,0.15); color:#FBBF24; padding:2px 6px; border-radius:10px; text-transform:uppercase; letter-spacing:0.5px;">${tool.serverName}</span>
         </div>
         <div class="tool-card-desc">${tool.description}</div>
       </div>
@@ -746,6 +987,8 @@
             let result;
             if (source === 'browser') {
                 result = await BrowserTools.execute(toolName);
+            } else if (source === 'cdp') {
+                result = await CDPTools.execute(toolName);
             } else if (source === 'mcp') {
                 const tool = mcpClient.getAllTools().find(t => t.name === toolName && t.serverName === serverName);
                 if (tool) {
@@ -867,6 +1110,21 @@
             tab.addEventListener('click', () => switchTab(tab.dataset.tab));
         });
 
+        // Sub-tab switching (MCP Tools)
+        $$('.sub-tab').forEach(subTab => {
+            subTab.addEventListener('click', () => {
+                // Remove active class from all sub-tabs and sections
+                $$('.sub-tab').forEach(t => t.classList.remove('active'));
+                $$('.tools-section').forEach(s => s.classList.remove('active'));
+
+                // Add active class to clicked sub-tab and corresponding section
+                subTab.classList.add('active');
+                const targetId = `section-${subTab.dataset.subtab}`;
+                const targetSection = document.getElementById(targetId);
+                if (targetSection) targetSection.classList.add('active');
+            });
+        });
+
         // Provider switching
         elements.providerSelect.addEventListener('change', (e) => {
             switchProvider(e.target.value);
@@ -923,6 +1181,23 @@
             }
         });
 
+        // Action buttons
+        elements.attachPageBtn.addEventListener('click', attachPageContent);
+        elements.clearChatBtn.addEventListener('click', clearChat);
+
+        // CDP attach tab shortcut
+        if (elements.attachTabBtn) {
+            elements.attachTabBtn.addEventListener('click', async () => {
+                showToast('Attaching debugger to current tab...', 'info');
+                try {
+                    const result = await CDPTools.execute('cdp_attach_tab');
+                    showToast(`Attached to tab ${result.tabId} successfully`, 'success');
+                } catch (err) {
+                    showToast(`Attach failed: ${err.message}`, 'error');
+                }
+            });
+        }
+
         // Close tool output
         elements.closeToolOutput.addEventListener('click', () => {
             elements.toolOutput.style.display = 'none';
@@ -932,57 +1207,58 @@
         const useInChatBtn = document.getElementById('useInChatBtn');
         if (useInChatBtn) {
             useInChatBtn.addEventListener('click', sendToolResultToChat);
-        }
 
-        // Refresh tools
-        elements.refreshToolsBtn.addEventListener('click', () => {
-            renderBrowserTools();
-            if (mcpClient) {
-                mcpClient.connectAll().then(tools => {
-                    renderMCPServerTools(tools);
-                    showToast('Tools refreshed', 'success');
-                }).catch(err => {
-                    showToast(`Refresh failed: ${err.message}`, 'error');
-                });
-            }
-        });
-
-        // Go to settings from tools panel
-        elements.goToSettingsBtn?.addEventListener('click', () => switchTab('settings'));
-
-        // Save settings
-        elements.saveSettingsBtn.addEventListener('click', async () => {
-            await saveSettings();
-            showToast('Settings saved!', 'success');
-            updateStatusDot();
-        });
-
-        // Test connection
-        elements.testConnectionBtn.addEventListener('click', testConnection);
-
-        // Reset settings
-        elements.resetSettingsBtn.addEventListener('click', () => {
-            if (confirm('Reset all settings to defaults?')) {
-                settings = getDefaultSettings();
-                applySettingsToUI();
-                saveSettings();
-                showToast('Settings reset to defaults', 'success');
-            }
-        });
-
-        // Toggle password visibility
-        $$('.toggle-visibility').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const target = $(`#${btn.dataset.target}`);
-                if (target.type === 'password') {
-                    target.type = 'text';
-                    btn.textContent = '🔒';
-                } else {
-                    target.type = 'password';
-                    btn.textContent = '👁';
+            // Refresh tools
+            elements.refreshToolsBtn.addEventListener('click', () => {
+                renderBrowserTools();
+                renderCDPTools();
+                if (mcpClient) {
+                    mcpClient.connectAll().then(tools => {
+                        renderMCPServerTools(tools);
+                        showToast('Tools refreshed', 'success');
+                    }).catch(err => {
+                        showToast(`Refresh failed: ${err.message}`, 'error');
+                    });
                 }
             });
-        });
+
+            // Go to settings from tools panel
+            elements.goToSettingsBtn?.addEventListener('click', () => switchTab('settings'));
+
+            // Save settings
+            elements.saveSettingsBtn.addEventListener('click', async () => {
+                await saveSettings();
+                showToast('Settings saved!', 'success');
+                updateStatusDot();
+            });
+
+            // Test connection
+            elements.testConnectionBtn.addEventListener('click', testConnection);
+
+            // Reset settings
+            elements.resetSettingsBtn.addEventListener('click', () => {
+                if (confirm('Reset all settings to defaults?')) {
+                    settings = getDefaultSettings();
+                    applySettingsToUI();
+                    saveSettings();
+                    showToast('Settings reset to defaults', 'success');
+                }
+            });
+
+            // Toggle password visibility
+            $$('.toggle-visibility').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = $(`#${btn.dataset.target}`);
+                    if (target.type === 'password') {
+                        target.type = 'text';
+                        btn.textContent = '🔒';
+                    } else {
+                        target.type = 'password';
+                        btn.textContent = '👁';
+                    }
+                });
+            });
+        }
     }
 
     // ===== Start =====

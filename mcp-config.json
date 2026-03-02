@@ -3,13 +3,10 @@
     "filesystem": {
       "command": "npx",
       "args": [
+        "-y",
         "@modelcontextprotocol/server-filesystem",
-        "C:/Users/Jeyaram/Desktop/mcp-tool/storage"
+        "C:\\Users\\Jeyaram\\Desktop\\1\\mcp-tool\\Files"
       ]
-    },
-    "browsermcp": {
-      "command": "npx",
-      "args": ["@browsermcp/mcp@latest"]
     }
   }
 }
